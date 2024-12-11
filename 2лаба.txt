@@ -1,0 +1,298 @@
+#include <iostream>
+#include <vector>
+#include <map>
+#include <list>
+#include <fstream>
+#include <unordered_map>
+#include <math.h>
+
+using namespace std;
+
+class Node
+{
+public:
+    int a;
+    unsigned char c;
+    unsigned char symbol;
+    Node* left, * right;
+
+    Node() { left = right = NULL; } // Конструктор по умолчанию
+
+    Node(Node* L, Node* R)
+    {
+        left = L;
+        right = R;
+        a = L->a + R->a; // Суммируем частоты для нового узла
+    }
+    Node(unsigned char symbol) : symbol(symbol), left(nullptr), right(nullptr) {}
+};
+
+struct MyCompare
+{
+    bool operator()(const Node* l, const Node* r) const { return l->a < r->a; } // Оператор сравнения для сортировки узлов по их частотам
+};
+
+vector<bool> code;
+map<unsigned char, vector<bool> > table;
+unordered_map<string, unsigned char> code_table;
+
+// Рекурсивная функция для построения таблицы кодов Хаффмана
+void BuildTable(Node* root)
+{
+    if (root->left != NULL)
+    {
+        code.push_back(0); // Добавляем 0, если движемся влево
+        BuildTable(root->left); // Рекурсивно вызываем для левого поддерева
+    }
+
+    if (root->right != NULL)
+    {
+        code.push_back(1); // Добавляем 1, если движемся вправо
+        BuildTable(root->right); // Рекурсивно вызываем для правого поддерева
+    }
+
+    if (root->left == NULL && root->right == NULL)
+        table[root->c] = code; // Когда достигнут лист, добавляем код в таблицу
+
+    code.pop_back(); // Удаляем последний бит, чтобы вернуться к предыдущему узлу при обратном проходе
+}
+Node* build_huffman_tree(std::unordered_map<std::string, unsigned char>& code_table) {
+    Node* root = new Node('\0');
+    for (auto& entry : code_table) {
+        std::string code = entry.first;
+        char symbol = entry.second;
+
+        Node* current_node = root;
+        for (char bit : code) {
+            if (bit == '0') {
+                if (!current_node->left) {
+                    current_node->left = new Node('\0');
+                }
+                current_node = current_node->left;
+            }
+            else if (bit == '1') {
+                if (!current_node->right) {
+                    current_node->right = new Node('\0');
+                }
+                current_node = current_node->right;
+            }
+        }
+        current_node->symbol = symbol;
+    }
+    return root;
+}
+
+// Функция для сжатия файла
+void compressFile(const char* filename) {
+    ifstream fI(filename, ios::binary);
+
+    map<unsigned char, int> m;
+
+    // Считаем частоты символов из файла
+    while (!fI.eof()) {
+        unsigned char c = fI.get();
+        m[c]++;
+    }
+
+    list<Node*> t;
+
+    // Создаем узлы для каждого символа и добавляем их в список
+    for (auto itr = m.begin(); itr != m.end(); ++itr) {
+        Node *p = new Node;
+        p->c = itr->first;
+        p->a = itr->second;
+        t.push_back(p);
+    }
+
+    // Строим дерево Хаффмана
+    while (t.size() != 1) {
+        t.sort(MyCompare());
+
+        Node *SonL = t.front();
+        t.pop_front();
+        Node *SonR = t.front();
+        t.pop_front();
+
+        Node *parent = new Node(SonL, SonR);
+        t.push_back(parent);
+    }
+
+    Node *root = t.front();
+
+    // Создаем таблицу кодов Хаффмана
+    BuildTable(root);
+
+    //записываем таблицу кодов в десятичном формате
+    ofstream tableH("tableH.txt",ios::out | ios::binary);
+    int n;
+    unsigned int res;
+    unsigned char num;
+
+    int k=0;
+    for (map<unsigned char, vector<bool> >::const_iterator i = table.begin(), end = table.end(); i != end; ++i) {
+
+        num= (i->first);
+        res=1;
+        n=1;
+        for (vector<bool>::const_iterator j = i->second.begin(), endV = i->second.end(); j != endV; ++j) {
+
+            if(*j==0) k=0;
+            if(*j==1) k=1;
+            res = res + k*(pow(2,n));
+            n++;
+        }
+        res=res+ pow(2,n);
+        tableH.write(reinterpret_cast<char*>(&num), 1);
+        tableH.write(reinterpret_cast<char*>(&res), 2);
+    }
+
+    // Сжимаем данные и записываем в файл
+    ofstream g1("output.txt", ios::out | ios::binary);
+
+    //fseek(fI, 0, SEEK_SET);
+    ifstream fi(filename, ios::binary);
+    int count = 0;
+    unsigned char buf = 0;
+    unsigned char c;
+    //fI.seekg(0);
+    while (!fi.eof())
+    {
+        c = fi.get();
+        vector<bool> x = table[c];
+        for (int n = 0; n < x.size(); n++)
+        {
+            buf = buf | x[n] << (7 - count);
+            count++;
+            if (count == 8)
+            {
+                count = 0;
+                g1 << buf;
+                buf = 0;
+            }
+        }
+    }
+
+    //fI.close();
+    g1.close();
+}
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+void decompressFile(const char* filenameARH){
+    ofstream FO("console1.png", ios::out | ios::binary);
+
+    string code;
+    //Читаем таблицу кодов
+    unsigned char c, cS, cH1, cH2;
+    ifstream tableHaf("tableH.txt", ios::in | ios::binary);
+    int nS = 0;
+    bool bite;
+    while (!tableHaf.eof()) {
+        cS = tableHaf.get();
+        nS++;
+        if (nS == 1) {
+            c = cS;
+        }
+        if (nS == 2) {
+            cH1 = cS;
+        }
+        if (nS == 3) {
+            cH2 = cS;
+            nS = 0;
+            if (cH2 != 0) {
+                for (int z = 0; z < 8; z++) {
+                    bite = (int) cH1 % 2;
+                    cH1 /= 2;
+                    if (bite == 1) {
+                        code += '1';
+                    }
+                    if (bite == 0) {
+                        code += '0';
+                    }
+
+                }
+                while (cH2 != 0) {
+                    bite = cH2 % 2;
+                    cH2 /= 2;
+                    if (bite == 1) {
+                        code += '1';
+                    }
+
+                    if (bite == 0) {
+                        code += '0';
+                    }
+                }
+            }
+            else{
+                while (cH1!=0){
+                    bite = (int) cH1 % 2;
+                    cH1 /= 2;
+                    if (bite == 1) {
+                        code += '1';
+                    }
+                    if (bite == 0) {
+                        code += '0';
+                    }
+                }
+            }
+            cout << endl;
+            code = code.substr(1);
+            code = code.substr(0, code.size() - 1);
+            auto ret = code_table.insert_or_assign(code, c);
+            cout << endl;
+            code.clear();
+        }
+    }
+
+    Node* root = build_huffman_tree(code_table);
+    tableHaf.close();
+    ifstream F(filenameARH, ios::in | ios::binary);
+    Node *p = root;
+    int count = 0;
+    unsigned char byte;
+    byte = F.get();
+    while (!F.eof()) {
+        bool b = byte & (1 << (7 - count));
+        if (b) p = p->right; else p = p->left;
+        if (p->left == NULL && p->right == NULL) {
+            FO << p->symbol;
+            p = root;
+        }
+        count++;
+        if (count == 8) {
+            count = 0;
+            byte = F.get();
+        }
+    }
+    F.close();
+}
+
+// Главная функция
+int main(int argc, char* argv[])
+{
+    setlocale(LC_ALL, "RUSSIAN");
+    int nR = argc;
+    char* nA1= argv[1];
+    if (nR!= 3)
+    {
+        cout << "Использование: " << argv[0] << " -z/-zip <входной_файл> или " << argv[0] << " -u/-unzip <сжатый_файл>" << endl;
+        return 1;
+    }
+
+    // Выполняем сжатие или декомпрессию в зависимости от аргументов
+    if (strcmp(nA1,"-z") == 0 || strcmp(nA1,"-zip") == 0)
+    {
+        compressFile(argv[2]);
+        cout << "Файл успешно сжат." << endl;
+    }
+    else if (strcmp(nA1,"-u") == 0 || strcmp(nA1,"-unzip") == 0)
+    {
+        decompressFile(argv[2]);
+        cout << "Файл успешно декомпрессирован." << endl;
+    }
+    else
+    {
+        cout << "Неверная команда. Использование: " << argv[0] << " -z/-zip <входной_файл> или " << argv[0] << " -u/-unzip <сжатый_файл>" << endl;
+        return 1;
+    }
+
+    return 0;
+}
